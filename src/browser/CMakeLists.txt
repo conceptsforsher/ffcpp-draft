@@ -1,0 +1,8 @@
+add_executable(firefox_cpp ../browser/main.cpp)
+target_link_libraries(firefox_cpp PRIVATE widget chrome network compositor ipc platform style webrender dom js X11)
+target_include_directories(firefox_cpp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_compile_features(firefox_cpp PRIVATE cxx_std_20)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_options(firefox_cpp PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(firefox_cpp PRIVATE -fsanitize=address,undefined)
+endif()

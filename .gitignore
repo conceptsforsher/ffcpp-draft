@@ -1,0 +1,14 @@
+build/
+*.o
+*.a
+*.so
+*.bmp
+*.png
+.DS_Store
+*.swp
+*.swo
+*~
+firefox-cpp/
+firefox-reference/
+quickjs/
+tmp/

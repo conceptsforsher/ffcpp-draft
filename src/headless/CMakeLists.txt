@@ -1,0 +1,8 @@
+add_executable(headless_browser main.cpp headless.cpp)
+target_link_libraries(headless_browser PRIVATE style webrender dom js)
+target_include_directories(headless_browser PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_compile_features(headless_browser PRIVATE cxx_std_20)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_options(headless_browser PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(headless_browser PRIVATE -fsanitize=address,undefined)
+endif()
