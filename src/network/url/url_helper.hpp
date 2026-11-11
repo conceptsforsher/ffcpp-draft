@@ -35,6 +35,10 @@ bool IsValidIPv4Addr(std::string_view addr);
 // translation of net_IsValidIPv6Addr (rust_net_is_valid_ipv6_addr)
 bool IsValidIPv6Addr(std::string_view addr);
 
+// translation of net_GetDefaultStatusTextForCode: stores the default reason
+// phrase for `code` in `outText` and reports whether the code is known.
+bool GetDefaultStatusTextForCode(uint16_t code, std::string& outText);
+
 // translation of net_ToLowerCase / net_FindCharInSet /
 // net_FindCharNotInSet / net_RFindCharNotInSet
 char* ToLowerCase(char* str, uint32_t length);

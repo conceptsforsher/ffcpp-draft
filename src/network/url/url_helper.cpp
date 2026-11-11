@@ -955,4 +955,198 @@ bool IsValidIPv6Addr(std::string_view addr) {
   return (doubleColon && blocks < 8) || (!doubleColon && blocks == 8);
 }
 
+
+//----------------------------------------------------------------------------
+// HTTP reason phrases (net_GetDefaultStatusTextForCode)
+//----------------------------------------------------------------------------
+
+bool GetDefaultStatusTextForCode(uint16_t code, std::string& outText) {
+  switch (code) {
+      // start with the most common
+    case 200:
+      outText.assign("OK");
+      break;
+    case 404:
+      outText.assign("Not Found");
+      break;
+    case 301:
+      outText.assign("Moved Permanently");
+      break;
+    case 304:
+      outText.assign("Not Modified");
+      break;
+    case 307:
+      outText.assign("Temporary Redirect");
+      break;
+    case 500:
+      outText.assign("Internal Server Error");
+      break;
+
+      // also well known
+    case 100:
+      outText.assign("Continue");
+      break;
+    case 101:
+      outText.assign("Switching Protocols");
+      break;
+    case 201:
+      outText.assign("Created");
+      break;
+    case 202:
+      outText.assign("Accepted");
+      break;
+    case 203:
+      outText.assign("Non Authoritative");
+      break;
+    case 204:
+      outText.assign("No Content");
+      break;
+    case 205:
+      outText.assign("Reset Content");
+      break;
+    case 206:
+      outText.assign("Partial Content");
+      break;
+    case 207:
+      outText.assign("Multi-Status");
+      break;
+    case 208:
+      outText.assign("Already Reported");
+      break;
+    case 300:
+      outText.assign("Multiple Choices");
+      break;
+    case 302:
+      outText.assign("Found");
+      break;
+    case 303:
+      outText.assign("See Other");
+      break;
+    case 305:
+      outText.assign("Use Proxy");
+      break;
+    case 308:
+      outText.assign("Permanent Redirect");
+      break;
+    case 400:
+      outText.assign("Bad Request");
+      break;
+    case 401:
+      outText.assign("Unauthorized");
+      break;
+    case 402:
+      outText.assign("Payment Required");
+      break;
+    case 403:
+      outText.assign("Forbidden");
+      break;
+    case 405:
+      outText.assign("Method Not Allowed");
+      break;
+    case 406:
+      outText.assign("Not Acceptable");
+      break;
+    case 407:
+      outText.assign("Proxy Authentication Required");
+      break;
+    case 408:
+      outText.assign("Request Timeout");
+      break;
+    case 409:
+      outText.assign("Conflict");
+      break;
+    case 410:
+      outText.assign("Gone");
+      break;
+    case 411:
+      outText.assign("Length Required");
+      break;
+    case 412:
+      outText.assign("Precondition Failed");
+      break;
+    case 413:
+      outText.assign("Request Entity Too Large");
+      break;
+    case 414:
+      outText.assign("Request URI Too Long");
+      break;
+    case 415:
+      outText.assign("Unsupported Media Type");
+      break;
+    case 416:
+      outText.assign("Requested Range Not Satisfiable");
+      break;
+    case 417:
+      outText.assign("Expectation Failed");
+      break;
+    case 418:
+      outText.assign("I'm a teapot");
+      break;
+    case 421:
+      outText.assign("Misdirected Request");
+      break;
+    case 422:
+      outText.assign("Unprocessable Entity");
+      break;
+    case 423:
+      outText.assign("Locked");
+      break;
+    case 424:
+      outText.assign("Failed Dependency");
+      break;
+    case 425:
+      outText.assign("Too Early");
+      break;
+    case 426:
+      outText.assign("Upgrade Required");
+      break;
+    case 428:
+      outText.assign("Precondition Required");
+      break;
+    case 429:
+      outText.assign("Too Many Requests");
+      break;
+    case 431:
+      outText.assign("Request Header Fields Too Large");
+      break;
+    case 451:
+      outText.assign("Unavailable For Legal Reasons");
+      break;
+    case 501:
+      outText.assign("Not Implemented");
+      break;
+    case 502:
+      outText.assign("Bad Gateway");
+      break;
+    case 503:
+      outText.assign("Service Unavailable");
+      break;
+    case 504:
+      outText.assign("Gateway Timeout");
+      break;
+    case 505:
+      outText.assign("HTTP Version Unsupported");
+      break;
+    case 506:
+      outText.assign("Variant Also Negotiates");
+      break;
+    case 507:
+      outText.assign("Insufficient Storage ");
+      break;
+    case 508:
+      outText.assign("Loop Detected");
+      break;
+    case 510:
+      outText.assign("Not Extended");
+      break;
+    case 511:
+      outText.assign("Network Authentication Required");
+      break;
+    default:
+      outText.assign("No Reason Phrase");
+      return false;
+  }
+  return true;
+}
+
 }  // namespace network::url

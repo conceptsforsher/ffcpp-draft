@@ -742,6 +742,28 @@ void TestUrlParamsSerialize() {
   CHECK(sorted.GetValueAtIndex(2) == "0");
 }
 
+void TestGetDefaultStatusTextForCode() {
+  std::string text;
+
+  CHECK(network::url::GetDefaultStatusTextForCode(200, text));
+  CHECK(text == "OK");
+  CHECK(network::url::GetDefaultStatusTextForCode(404, text));
+  CHECK(text == "Not Found");
+  CHECK(network::url::GetDefaultStatusTextForCode(308, text));
+  CHECK(text == "Permanent Redirect");
+  CHECK(network::url::GetDefaultStatusTextForCode(418, text));
+  CHECK(text == "I'm a teapot");
+  // Gecko really does keep the trailing space here
+  CHECK(network::url::GetDefaultStatusTextForCode(507, text));
+  CHECK(text == "Insufficient Storage ");
+
+  // unknown codes get the placeholder and report false
+  CHECK(!network::url::GetDefaultStatusTextForCode(599, text));
+  CHECK(text == "No Reason Phrase");
+  CHECK(!network::url::GetDefaultStatusTextForCode(0, text));
+  CHECK(text == "No Reason Phrase");
+}
+
 }  // namespace
 
 int main() {
@@ -766,6 +788,7 @@ int main() {
   TestUrlParamsDecodeAndParse();
   TestUrlParamsMutation();
   TestUrlParamsSerialize();
+  TestGetDefaultStatusTextForCode();
 
   if (gFailures != 0) {
     std::fprintf(stderr, "%d check(s) failed\n", gFailures);
