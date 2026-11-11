@@ -11,7 +11,10 @@
 #include <cstdint>
 #include <string>
 
+#include <vector>
+
 #include "network/url/url_helper.hpp"
+#include "network/url/url_params.hpp"
 #include "network/url/url_parser.hpp"
 
 namespace {
@@ -613,6 +616,132 @@ void TestParseRequestContentType() {
   CHECK(type.empty());
 }
 
+
+void TestUrlParamsDecodeAndParse() {
+  using network::url::UrlParams;
+
+  UrlParams params;
+  params.ParseInput("a=b&c=d");
+  CHECK(params.Length() == 2);
+  CHECK(params.GetKeyAtIndex(0) == "a");
+  CHECK(params.GetValueAtIndex(0) == "b");
+  CHECK(params.GetKeyAtIndex(1) == "c");
+
+  std::string value;
+  params.Get("a", value);
+  CHECK(value == "b");
+  params.Get("missing", value);
+  CHECK(value.empty());
+
+  CHECK(params.Has("c"));
+  CHECK(params.Has("c", "d"));
+  CHECK(!params.Has("c", "x"));
+  CHECK(!params.Has("nope"));
+
+  // '+' is a space and %XX is percent-decoded
+  UrlParams decoded;
+  decoded.ParseInput("q=b%20c+d&empty=&novalue");
+  CHECK(decoded.Length() == 3);
+  decoded.Get("q", value);
+  CHECK(value == "b c d");
+  decoded.Get("empty", value);
+  CHECK(value.empty());
+  CHECK(decoded.Has("novalue"));
+  decoded.Get("novalue", value);
+  CHECK(value.empty());
+
+  // an incomplete escape is kept verbatim: Get() reports the first value
+  UrlParams partial;
+  partial.ParseInput("q=%zz&q=%4");
+  partial.Get("q", value);
+  CHECK(value == "%zz");
+  std::vector<std::string> partialValues;
+  partial.GetAll("q", partialValues);
+  CHECK(partialValues.size() == 2);
+  CHECK(partialValues[1] == "%4");
+
+  // empty segments are skipped, so this has two entries rather than four
+  UrlParams holes;
+  holes.ParseInput("&a=1&&b=2&");
+  CHECK(holes.Length() == 2);
+
+  // the one-shot extractor returns the first value of the name
+  CHECK(UrlParams::Extract("a=1&b=2&a=3", "a", value));
+  CHECK(value == "1");
+  CHECK(!UrlParams::Extract("a=1", "b", value));
+  CHECK(value.empty());
+}
+
+void TestUrlParamsMutation() {
+  using network::url::UrlParams;
+
+  UrlParams params;
+  params.Append("a", "1");
+  params.Append("b", "2");
+  params.Append("a", "3");
+  CHECK(params.Length() == 3);
+
+  std::vector<std::string> all;
+  params.GetAll("a", all);
+  CHECK(all.size() == 2);
+  CHECK(all[0] == "1");
+  CHECK(all[1] == "3");
+
+  // Set replaces the first occurrence and drops the further ones
+  params.Set("a", "9");
+  CHECK(params.Length() == 2);
+  all.clear();
+  params.GetAll("a", all);
+  CHECK(all.size() == 1);
+  CHECK(all[0] == "9");
+
+  // a name that is not there yet behaves like Append
+  params.Set("c", "4");
+  CHECK(params.Length() == 3);
+  CHECK(params.GetValueAtIndex(2) == "4");
+
+  params.Delete("a");
+  CHECK(!params.Has("a"));
+  CHECK(params.Length() == 2);
+
+  params.Append("b", "5");
+  params.Delete("b", "5");
+  CHECK(params.Length() == 2);
+
+  params.DeleteAll();
+  CHECK(params.Length() == 0);
+}
+
+void TestUrlParamsSerialize() {
+  using network::url::UrlParams;
+
+  std::string out;
+  UrlParams::SerializeString("a b&c", out);
+  CHECK(out == "a+b%26c");
+
+  UrlParams params;
+  params.Append("a b", "c&d");
+  params.Append("e", "f");
+
+  params.Serialize(out, false);
+  CHECK(out == "a b=c&d&e=f");
+
+  params.Serialize(out, true);
+  CHECK(out == "a+b=c%26d&e=f");
+
+  // sorting keeps duplicated names together and their order stable
+  UrlParams sorted;
+  sorted.Append("b", "1");
+  sorted.Append("a", "2");
+  sorted.Append("b", "0");
+  sorted.Sort();
+  CHECK(sorted.GetKeyAtIndex(0) == "a");
+  CHECK(sorted.GetKeyAtIndex(1) == "b");
+  CHECK(sorted.GetValueAtIndex(1) == "1");
+  CHECK(sorted.GetKeyAtIndex(2) == "b");
+  CHECK(sorted.GetValueAtIndex(2) == "0");
+}
+
 }  // namespace
 
 int main() {
@@ -634,6 +763,9 @@ int main() {
   TestParseFileURL();
   TestParseContentType();
   TestParseRequestContentType();
+  TestUrlParamsDecodeAndParse();
+  TestUrlParamsMutation();
+  TestUrlParamsSerialize();
 
   if (gFailures != 0) {
     std::fprintf(stderr, "%d check(s) failed\n", gFailures);
