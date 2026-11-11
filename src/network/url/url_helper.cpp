@@ -623,7 +623,7 @@ void ParseMediaType(std::string_view mediaType, std::string& contentType,
   const char* typeEnd = FindCharInSet(type, end, HTTP_LWS ";");
 
   const char* charset = "";
-  const char* charsetEnd = charset;
+  const char* charsetValueEnd = charset;
   int32_t charsetParamStart = 0;
   int32_t charsetParamEnd = 0;
 
@@ -636,10 +636,12 @@ void ParseMediaType(std::string_view mediaType, std::string& contentType,
     // We have parameters.  Iterate over them.
     size_t curParamStart = paramStart + 1;
     do {
-      const size_t curParamEnd = FindMediaDelimiter(mediaType, curParamStart, ';');
+      const size_t curParamEnd =
+          FindMediaDelimiter(mediaType, curParamStart, ';');
 
       const char* paramName =
-          FindCharNotInSet(start + curParamStart, start + curParamEnd, HTTP_LWS);
+          FindCharNotInSet(start + curParamStart, start + curParamEnd,
+                           HTTP_LWS);
       static const char charsetStr[] = "charset=";
       // Gecko compares the eight bytes unconditionally; here the remaining
       // length is checked first so that we never read past the media type.
@@ -648,7 +650,7 @@ void ParseMediaType(std::string_view mediaType, std::string& contentType,
           AsciiStrNCmpCaseInsensitive(paramName, charsetStr,
                                       sizeof(charsetStr) - 1) == 0) {
         charset = paramName + sizeof(charsetStr) - 1;
-        charsetEnd = start + curParamEnd;
+        charsetValueEnd = start + curParamEnd;
         typeHasCharset = true;
         charsetParamStart = static_cast<int32_t>(curParamStart - 1);
         charsetParamEnd = static_cast<int32_t>(curParamEnd);
@@ -662,15 +664,15 @@ void ParseMediaType(std::string_view mediaType, std::string& contentType,
   bool charsetNeedsQuotedStringUnescaping = false;
   if (typeHasCharset) {
     // Trim LWS leading and trailing whitespace from charset.
-    charset = FindCharNotInSet(charset, charsetEnd, HTTP_LWS);
+    charset = FindCharNotInSet(charset, charsetValueEnd, HTTP_LWS);
     if (*charset == '"') {
       charsetNeedsQuotedStringUnescaping = true;
-      charsetEnd =
+      charsetValueEnd =
           start + FindStringEnd(mediaType, static_cast<size_t>(charset - start),
                                 *charset);
       ++charset;
     } else {
-      charsetEnd = FindCharInSet(charset, charsetEnd, HTTP_LWS ";");
+      charsetValueEnd = FindCharInSet(charset, charsetValueEnd, HTTP_LWS ";");
     }
   }
 
@@ -695,7 +697,8 @@ void ParseMediaType(std::string_view mediaType, std::string& contentType,
                                                          typeEnd - type)));
     if (!eq) {
       contentType.assign(type, static_cast<size_t>(typeEnd - type));
-      ToLowerCase(contentType.data(), static_cast<uint32_t>(contentType.size()));
+      ToLowerCase(contentType.data(),
+                  static_cast<uint32_t>(contentType.size()));
     }
 
     if ((!eq && *hadCharset) || typeHasCharset) {
@@ -704,15 +707,16 @@ void ParseMediaType(std::string_view mediaType, std::string& contentType,
         // parameters using the "quoted-string" syntax need
         // backslash-escapes to be unescaped (see RFC 2616 Section 2.2)
         contentCharset.clear();
-        for (const char* c = charset; c != charsetEnd; ++c) {
-          if (*c == '\\' && c + 1 != charsetEnd) {
+        for (const char* c = charset; c != charsetValueEnd; ++c) {
+          if (*c == '\\' && c + 1 != charsetValueEnd) {
             // eat escape
             ++c;
           }
           contentCharset.push_back(*c);
         }
       } else {
-        contentCharset.assign(charset, static_cast<size_t>(charsetEnd - charset));
+        contentCharset.assign(
+            charset, static_cast<size_t>(charsetValueEnd - charset));
       }
       if (typeHasCharset) {
         *charsetStart = charsetParamStart + offset;
