@@ -566,17 +566,17 @@ void TestParseContentType() {
   CHECK(type == "text/html");
   CHECK(charset == "ISO-8859-1");
   CHECK(charsetStart == 9);
-  CHECK(charsetEnd == 29);
+  CHECK(charsetEnd == 28);
 
-  // without a charset parameter both positions point at the ';' of the
-  // current media type (or at its end when there is none)
+  // without a charset parameter both positions point at the end of the
+  // media type (they would point at its ';' if it had one)
   type.clear();
   charset.clear();
   network::url::ParseContentType("text/html", type, charset, &hadCharset,
                                  &charsetStart, &charsetEnd);
   CHECK(type == "text/html");
-  CHECK(charsetStart == 8);
-  CHECK(charsetEnd == 8);
+  CHECK(charsetStart == 9);
+  CHECK(charsetEnd == 9);
 }
 
 void TestParseRequestContentType() {
