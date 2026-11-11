@@ -32,6 +32,9 @@ bool IsValidScheme(std::string_view scheme);
 // translation of net_IsValidIPv4Addr (rust_net_is_valid_ipv4_addr)
 bool IsValidIPv4Addr(std::string_view addr);
 
+// translation of net_IsValidIPv6Addr (rust_net_is_valid_ipv6_addr)
+bool IsValidIPv6Addr(std::string_view addr);
+
 // translation of net_ToLowerCase / net_FindCharInSet /
 // net_FindCharNotInSet / net_RFindCharNotInSet
 char* ToLowerCase(char* str, uint32_t length);
