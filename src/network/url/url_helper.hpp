@@ -75,4 +75,18 @@ Result ParseFileURL(std::string_view inUrl, std::string& outDirectory,
                     std::string& outFileBaseName,
                     std::string& outFileExtension);
 
+// translation of net_ParseContentType.  `aHadCharset`, `aCharsetStart` and
+// `aCharsetEnd` are out-parameters just like in Gecko; the overload without
+// the two positions feeds dummies into the four-argument version, again like
+// Gecko does.
+void ParseContentType(std::string_view header, std::string& contentType,
+                      std::string& contentCharset, bool* hadCharset);
+void ParseContentType(std::string_view header, std::string& contentType,
+                      std::string& contentCharset, bool* hadCharset,
+                      int32_t* charsetStart, int32_t* charsetEnd);
+
+// translation of net_ParseRequestContentType
+void ParseRequestContentType(std::string_view header, std::string& contentType,
+                             std::string& contentCharset, bool* hadCharset);
+
 }  // namespace network::url

@@ -484,6 +484,135 @@ void TestParseFileURL() {
                                    extension) == Result::ErrorMalformedUri);
 }
 
+void TestParseContentType() {
+  std::string type, charset;
+  bool hadCharset = true;
+
+  // plain media type
+  network::url::ParseContentType("text/html", type, charset, &hadCharset);
+  CHECK(type == "text/html");
+  CHECK(charset.empty());
+  CHECK(!hadCharset);
+
+  // the type is lower-cased, surrounding LWS is dropped
+  type.clear();
+  charset.clear();
+  network::url::ParseContentType("  TEXT/HTML  ", type, charset, &hadCharset);
+  CHECK(type == "text/html");
+
+  // charset parameter
+  type.clear();
+  charset.clear();
+  network::url::ParseContentType("text/html; charset=ISO-8859-1", type, charset,
+                                 &hadCharset);
+  CHECK(type == "text/html");
+  CHECK(charset == "ISO-8859-1");
+  CHECK(hadCharset);
+
+  // quoted-string charset: the quotes are removed
+  type.clear();
+  charset.clear();
+  network::url::ParseContentType("text/html; charset=\"ISO-8859-1\"", type,
+                                 charset, &hadCharset);
+  CHECK(type == "text/html");
+  CHECK(charset == "ISO-8859-1");
+  CHECK(hadCharset);
+
+  // later media types replace an earlier different one (same-type entries
+  // only update the charset), so this ends up as text/plain
+  type.clear();
+  charset.clear();
+  network::url::ParseContentType("text/html, text/plain; charset=utf-8", type,
+                                 charset, &hadCharset);
+  CHECK(type == "text/plain");
+  CHECK(charset == "utf-8");
+  CHECK(hadCharset);
+
+  // a charset anywhere in the list still counts
+  type.clear();
+  charset.clear();
+  network::url::ParseContentType("text/html,text/html; charset=ISO-8859-1",
+                                 type, charset, &hadCharset);
+  CHECK(type == "text/html");
+  CHECK(charset == "ISO-8859-1");
+  CHECK(hadCharset);
+
+  // commas inside a quoted string do not split the media type
+  type.clear();
+  charset.clear();
+  network::url::ParseContentType("text/html; charset=\"a,b\"", type, charset,
+                                 &hadCharset);
+  CHECK(type == "text/html");
+  CHECK(charset == "a,b");
+
+  // "*/*" is meaningless and therefore not stored
+  type.clear();
+  charset.clear();
+  network::url::ParseContentType("*/*", type, charset, &hadCharset);
+  CHECK(type.empty());
+
+  // no slash -> not a media type
+  type.clear();
+  charset.clear();
+  network::url::ParseContentType("text", type, charset, &hadCharset);
+  CHECK(type.empty());
+
+  // the overload carrying the charset parameter positions
+  type.clear();
+  charset.clear();
+  int32_t charsetStart = -1, charsetEnd = -1;
+  network::url::ParseContentType("text/html;charset=ISO-8859-1", type, charset,
+                                 &hadCharset, &charsetStart, &charsetEnd);
+  CHECK(type == "text/html");
+  CHECK(charset == "ISO-8859-1");
+  CHECK(charsetStart == 9);
+  CHECK(charsetEnd == 29);
+
+  // without a charset parameter both positions point at the ';' of the
+  // current media type (or at its end when there is none)
+  type.clear();
+  charset.clear();
+  network::url::ParseContentType("text/html", type, charset, &hadCharset,
+                                 &charsetStart, &charsetEnd);
+  CHECK(type == "text/html");
+  CHECK(charsetStart == 8);
+  CHECK(charsetEnd == 8);
+}
+
+void TestParseRequestContentType() {
+  std::string type, charset;
+  bool hadCharset = true;
+
+  network::url::ParseRequestContentType("text/html; charset=UTF-8", type,
+                                        charset, &hadCharset);
+  CHECK(type == "text/html");
+  CHECK(charset == "UTF-8");
+  CHECK(hadCharset);
+
+  network::url::ParseRequestContentType("application/octet-stream", type,
+                                        charset, &hadCharset);
+  CHECK(type == "application/octet-stream");
+  CHECK(charset.empty());
+  CHECK(!hadCharset);
+
+  // a request Content-Type must hold a single media type
+  type = "x";
+  charset = "y";
+  network::url::ParseRequestContentType("text/html, text/plain", type, charset,
+                                        &hadCharset);
+  CHECK(type.empty());
+  CHECK(charset.empty());
+  CHECK(!hadCharset);
+
+  // strictness: junk after the media type itself rejects the whole header
+  // (here there is no ';' so nothing is consumed past "text/html")
+  type.clear();
+  charset.clear();
+  network::url::ParseRequestContentType("text/html junk", type, charset,
+                                        &hadCharset);
+  CHECK(type.empty());
+}
+
 }  // namespace
 
 int main() {
@@ -503,6 +632,8 @@ int main() {
   TestIsValidDNSHost();
   TestCoalesceDirs();
   TestParseFileURL();
+  TestParseContentType();
+  TestParseRequestContentType();
 
   if (gFailures != 0) {
     std::fprintf(stderr, "%d check(s) failed\n", gFailures);

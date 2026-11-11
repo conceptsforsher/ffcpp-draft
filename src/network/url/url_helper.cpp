@@ -4,6 +4,8 @@
 
 #include "network/url/url_helper.hpp"
 
+#include <cstring>
+
 namespace network::url {
 namespace {
 
@@ -60,6 +62,30 @@ int AsciiStrNCmpCaseInsensitive(const char* a, const char* b, size_t n) {
 // StaticPrefs::network_standard_url_max_length().  The pref default is 1 MiB;
 // the port keeps it as a constant because there is no pref service here.
 constexpr uint32_t kMaxUrlLength = 1048576u;
+
+// nsCString::FindCharInSet returns kNotFound (a uint32_t -1) when nothing
+// matches; the translations below use size_t and this sentinel instead.
+constexpr size_t kNotFound = static_cast<size_t>(-1);
+
+// translation of nsCString::FindCharInSet for the byte-set form used by the
+// Content-Type parsers: the first index >= `start` holding one of `set`, or
+// kNotFound.
+size_t FindCharInSetIndex(std::string_view str, const char* set, size_t start) {
+  for (size_t i = start; i < str.size(); ++i) {
+    for (const char* s = set; *s; ++s) {
+      if (str[i] == *s) return i;
+    }
+  }
+  return kNotFound;
+}
+
+// translation of nsCaseInsensitiveCStringComparator over two byte ranges.
+bool EqualsCaseInsensitive(std::string_view a, std::string_view b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  return AsciiStrNCmpCaseInsensitive(a.data(), b.data(), a.size()) == 0;
+}
 
 }  // namespace
 
@@ -514,6 +540,294 @@ Result ParseFileURL(std::string_view inUrl, std::string& outDirectory,
   // XXX not strictly true... file://localhost/foo/bar.html is a valid URL
 
   return Result::Ok;
+}
+
+//----------------------------------------------------------------------------
+// Content-Type parsing (net_ParseMediaType, net_ParseContentType,
+// net_ParseRequestContentType)
+//----------------------------------------------------------------------------
+
+#define HTTP_LWS " \t"
+
+// translation of net_FindStringEnd: return the index of the closing quote of
+// the string starting at `stringStart`, if any.
+size_t FindStringEnd(std::string_view flatStr, size_t stringStart,
+                     char stringDelim) {
+  const char set[] = {stringDelim, '\\', '\0'};
+  do {
+    // stringStart points to either the start quote or the last
+    // escaped char (the char following a '\\')
+
+    // Write to searchStart here, so that when we get back to the
+    // top of the loop right outside this one we search from the
+    // right place.
+    const size_t stringEnd = FindCharInSetIndex(flatStr, set, stringStart + 1);
+    if (stringEnd == kNotFound) return flatStr.size();
+
+    const char ch = flatStr[stringEnd];
+    if (ch == '\\') {
+      // Hit a backslash-escaped char.  Need to skip over it.
+      stringStart = stringEnd + 1;
+      if (stringStart == flatStr.size()) return stringStart;
+
+      // Go back to looking for the next escape or the string end
+      continue;
+    }
+
+    return stringEnd;
+
+  } while (true);
+}
+
+// translation of net_FindMediaDelimiter: like FindCharInSetIndex for
+// `delimiter`, except that quoted strings are skipped over so that a
+// delimiter inside a quoted string is not mistaken for the real one.
+size_t FindMediaDelimiter(std::string_view flatStr, size_t searchStart,
+                          char delimiter) {
+  do {
+    // searchStart points to the spot from which we should start looking
+    // for the delimiter.
+    const char delimStr[] = {delimiter, '"', '\0'};
+    const size_t curDelimPos = FindCharInSetIndex(flatStr, delimStr, searchStart);
+    if (curDelimPos == kNotFound) return flatStr.size();
+
+    const char ch = flatStr[curDelimPos];
+    if (ch == delimiter) {
+      // Found delimiter
+      return curDelimPos;
+    }
+
+    // We hit the start of a quoted string.  Look for its end.
+    searchStart = FindStringEnd(flatStr, curDelimPos, ch);
+    if (searchStart == flatStr.size()) return searchStart;
+
+    ++searchStart;
+
+    // searchStart now points to the first char after the end of the
+    // string, so just go back to the top of the loop and look for
+    // |delimiter| again.
+  } while (true);
+}
+
+// aOffset should be added to aCharsetStart and aCharsetEnd if this
+// function sets them.
+void ParseMediaType(std::string_view mediaType, std::string& contentType,
+                    std::string& contentCharset, int32_t offset,
+                    bool* hadCharset, int32_t* charsetStart,
+                    int32_t* charsetEnd, bool strict) {
+  const char* const start = mediaType.data();
+  const char* const end = start + mediaType.size();
+
+  // Trim LWS leading and trailing whitespace from type.
+  const char* type = FindCharNotInSet(start, end, HTTP_LWS);
+  const char* typeEnd = FindCharInSet(type, end, HTTP_LWS ";");
+
+  const char* charset = "";
+  const char* charsetEnd = charset;
+  int32_t charsetParamStart = 0;
+  int32_t charsetParamEnd = 0;
+
+  size_t consumed = static_cast<size_t>(typeEnd - type);
+
+  // Iterate over parameters
+  bool typeHasCharset = false;
+  size_t paramStart = mediaType.find(';', static_cast<size_t>(typeEnd - start));
+  if (paramStart != kNotFound) {
+    // We have parameters.  Iterate over them.
+    size_t curParamStart = paramStart + 1;
+    do {
+      const size_t curParamEnd = FindMediaDelimiter(mediaType, curParamStart, ';');
+
+      const char* paramName =
+          FindCharNotInSet(start + curParamStart, start + curParamEnd, HTTP_LWS);
+      static const char charsetStr[] = "charset=";
+      // Gecko compares the eight bytes unconditionally; here the remaining
+      // length is checked first so that we never read past the media type.
+      if (static_cast<size_t>(start + curParamEnd - paramName) >=
+              sizeof(charsetStr) - 1 &&
+          AsciiStrNCmpCaseInsensitive(paramName, charsetStr,
+                                      sizeof(charsetStr) - 1) == 0) {
+        charset = paramName + sizeof(charsetStr) - 1;
+        charsetEnd = start + curParamEnd;
+        typeHasCharset = true;
+        charsetParamStart = static_cast<int32_t>(curParamStart - 1);
+        charsetParamEnd = static_cast<int32_t>(curParamEnd);
+      }
+
+      consumed = curParamEnd;
+      curParamStart = curParamEnd + 1;
+    } while (curParamStart < mediaType.size());
+  }
+
+  bool charsetNeedsQuotedStringUnescaping = false;
+  if (typeHasCharset) {
+    // Trim LWS leading and trailing whitespace from charset.
+    charset = FindCharNotInSet(charset, charsetEnd, HTTP_LWS);
+    if (*charset == '"') {
+      charsetNeedsQuotedStringUnescaping = true;
+      charsetEnd =
+          start + FindStringEnd(mediaType, static_cast<size_t>(charset - start),
+                                *charset);
+      ++charset;
+    } else {
+      charsetEnd = FindCharInSet(charset, charsetEnd, HTTP_LWS ";");
+    }
+  }
+
+  // if the server sent "*/*", it is meaningless, so do not store it.
+  // also, if type is the same as aContentType, then just update the
+  // charset.  however, if charset is empty and aContentType hasn't
+  // changed, then don't wipe-out an existing aContentCharset.  We
+  // also want to reject a mime-type if it does not include a slash.
+  // some servers give junk after the charset parameter, which may
+  // include a comma, so this check makes us a bit more tolerant.
+
+  if (type != typeEnd &&
+      std::memchr(type, '/', static_cast<size_t>(typeEnd - type)) != nullptr &&
+      (strict ? (FindCharNotInSet(start + consumed, end, HTTP_LWS) == end)
+              : (std::string_view(type, static_cast<size_t>(typeEnd - type)) !=
+                 "*/*"))) {
+    // Common case here is that aContentType is empty
+    const bool eq =
+        !contentType.empty() &&
+        EqualsCaseInsensitive(contentType,
+                              std::string_view(type, static_cast<size_t>(
+                                                         typeEnd - type)));
+    if (!eq) {
+      contentType.assign(type, static_cast<size_t>(typeEnd - type));
+      ToLowerCase(contentType.data(), static_cast<uint32_t>(contentType.size()));
+    }
+
+    if ((!eq && *hadCharset) || typeHasCharset) {
+      *hadCharset = true;
+      if (charsetNeedsQuotedStringUnescaping) {
+        // parameters using the "quoted-string" syntax need
+        // backslash-escapes to be unescaped (see RFC 2616 Section 2.2)
+        contentCharset.clear();
+        for (const char* c = charset; c != charsetEnd; ++c) {
+          if (*c == '\\' && c + 1 != charsetEnd) {
+            // eat escape
+            ++c;
+          }
+          contentCharset.push_back(*c);
+        }
+      } else {
+        contentCharset.assign(charset, static_cast<size_t>(charsetEnd - charset));
+      }
+      if (typeHasCharset) {
+        *charsetStart = charsetParamStart + offset;
+        *charsetEnd = charsetParamEnd + offset;
+      }
+    }
+    // Only set a new charset position if this is a different type
+    // from the last one we had and it doesn't already have a
+    // charset param.  If this is the same type, we probably want
+    // to leave the charset position on its first occurrence.
+    if (!eq && !typeHasCharset) {
+      int32_t charsetStartPos = paramStart == kNotFound
+                                    ? static_cast<int32_t>(mediaType.size())
+                                    : static_cast<int32_t>(paramStart);
+      *charsetEnd = *charsetStart = charsetStartPos + offset;
+    }
+  }
+}
+
+#undef HTTP_LWS
+
+void ParseContentType(std::string_view header, std::string& contentType,
+                      std::string& contentCharset, bool* hadCharset) {
+  int32_t dummy1, dummy2;
+  ParseContentType(header, contentType, contentCharset, hadCharset, &dummy1,
+                   &dummy2);
+}
+
+void ParseContentType(std::string_view header, std::string& contentType,
+                      std::string& contentCharset, bool* hadCharset,
+                      int32_t* charsetStart, int32_t* charsetEnd) {
+  //
+  // Augmented BNF (from RFC 2616 section 3.7):
+  //
+  //   header-value = media-type *( LWS "," LWS media-type )
+  //   media-type   = type "/" subtype *( LWS ";" LWS parameter )
+  //   type         = token
+  //   subtype      = token
+  //   parameter    = attribute "=" value
+  //   attribute    = token
+  //   value        = token | quoted-string
+  //
+  //
+  // Examples:
+  //
+  //   text/html
+  //   text/html, text/html
+  //   text/html,text/html; charset=ISO-8859-1
+  //   text/html,text/html; charset="ISO-8859-1"
+  //   text/html;charset=ISO-8859-1, text/html
+  //   text/html;charset='ISO-8859-1', text/html
+  //   application/octet-stream
+  //
+
+  *hadCharset = false;
+
+  // iterate over media-types.  Note that ',' characters can happen
+  // inside quoted strings, so we need to watch out for that.
+  size_t curTypeStart = 0;
+  do {
+    // curTypeStart points to the start of the current media-type.  We want
+    // to look for its end.
+    const size_t curTypeEnd = FindMediaDelimiter(header, curTypeStart, ',');
+
+    // At this point curTypeEnd points to the spot where the media-type
+    // starting at curTypeStart ends.  Time to parse that!
+    ParseMediaType(header.substr(curTypeStart, curTypeEnd - curTypeStart),
+                   contentType, contentCharset,
+                   static_cast<int32_t>(curTypeStart), hadCharset, charsetStart,
+                   charsetEnd, false);
+
+    // And let's move on to the next media-type
+    curTypeStart = curTypeEnd + 1;
+  } while (curTypeStart < header.size());
+}
+
+void ParseRequestContentType(std::string_view header, std::string& contentType,
+                             std::string& contentCharset, bool* hadCharset) {
+  //
+  // Augmented BNF (from RFC 7231 section 3.1.1.1):
+  //
+  //   media-type   = type "/" subtype *( OWS ";" OWS parameter )
+  //   type         = token
+  //   subtype      = token
+  //   parameter    = token "=" ( token / quoted-string )
+  //
+  // Examples:
+  //
+  //   text/html
+  //   text/html; charset=ISO-8859-1
+  //   text/html; charset="ISO-8859-1"
+  //   application/octet-stream
+  //
+
+  contentType.clear();
+  contentCharset.clear();
+  *hadCharset = false;
+
+  // At this point curTypeEnd points to the spot where the media-type
+  // starting at curTypeEnd ends.  Time to parse that!
+  std::string mediaContentType, mediaContentCharset;
+  bool mediaHadCharset = false;
+  int32_t dummy1, dummy2;
+  const size_t typeEnd = FindMediaDelimiter(header, 0, ',');
+  if (typeEnd != header.size()) {
+    // We have some stuff left at the end, so this is not a valid
+    // request Content-Type header.
+    return;
+  }
+  ParseMediaType(header, mediaContentType, mediaContentCharset, 0,
+                 &mediaHadCharset, &dummy1, &dummy2, true);
+
+  contentType = mediaContentType;
+  contentCharset = mediaContentCharset;
+  *hadCharset = mediaHadCharset;
 }
 
 bool IsValidSchemeChar(unsigned char aChar) {
