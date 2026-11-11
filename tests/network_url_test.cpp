@@ -401,9 +401,12 @@ void TestCharacterHelpers() {
   // everything is in the set -> returns stop
   CHECK(network::url::FindCharNotInSet(padded, padded + 2, " ") == padded + 2);
 
+  // Scanning backwards from the end, the last character that is *not* in the
+  // set is 'b' at index 2: the function returns the position reached, not the
+  // position of the last match.
   char trailing[] = "xab  ";
   CHECK(network::url::RFindCharNotInSet(trailing + 1, trailing + 5, " ") ==
-        trailing + 3);
+        trailing + 2);
 }
 
 void TestIsValidDNSHost() {
@@ -430,7 +433,10 @@ void TestCoalesceDirs() {
     auto result = network::url::CoalesceDirs(path);
     CHECK(result.has_value());
     CHECK(std::string(path) == "/foo/");
-    CHECK(result->lastSlash == 0);
+    // lastSlash is the index of the last '/' before any '?' or '#', which for
+    // "/foo/" is the trailing slash itself (index 4); endOfBasename is the
+    // length of the path without query/ref.
+    CHECK(result->lastSlash == 4);
     CHECK(result->endOfBasename == 5);
   }
   {
