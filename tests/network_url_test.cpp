@@ -9,6 +9,7 @@
 
 #include <cstdio>
 #include <cstdint>
+#include <string>
 
 #include "network/url/url_helper.hpp"
 #include "network/url/url_parser.hpp"
@@ -327,6 +328,156 @@ void TestParseFileName() {
   CHECK(extensionLen == -1);
 }
 
+//--------------------------------------------------------------------------
+// netwerk/base/nsURLHelper.cpp: scheme, path and file URL helpers
+//--------------------------------------------------------------------------
+void TestExtractURLScheme() {
+  std::string scheme;
+
+  CHECK(network::url::ExtractURLScheme("HTTP://www.foo.com/bar", scheme) ==
+        Result::Ok);
+  CHECK(scheme == "http");
+
+  // leading C0 controls and space are skipped
+  CHECK(network::url::ExtractURLScheme("  http://www.foo.com/bar", scheme) ==
+        Result::Ok);
+  CHECK(scheme == "http");
+
+  // \r\n\t inside the scheme are stripped from the result
+  CHECK(network::url::ExtractURLScheme("ht\ttp://www.foo.com/bar", scheme) ==
+        Result::Ok);
+  CHECK(scheme == "http");
+
+  CHECK(network::url::ExtractURLScheme("mailto:user@host", scheme) ==
+        Result::Ok);
+  CHECK(scheme == "mailto");
+
+  // no colon -> not a scheme
+  CHECK(network::url::ExtractURLScheme("http", scheme) ==
+        Result::ErrorMalformedUri);
+  // first char must be alpha
+  CHECK(network::url::ExtractURLScheme("1http://x", scheme) ==
+        Result::ErrorMalformedUri);
+}
+
+void TestIsAbsoluteURL() {
+  CHECK(network::url::IsAbsoluteURL("http://www.foo.com/bar"));
+  CHECK(network::url::IsAbsoluteURL("HTTP://www.foo.com/bar"));
+  CHECK(network::url::IsAbsoluteURL("ftp://www.foo.com/bar"));
+  // only one slash after the scheme
+  CHECK(!network::url::IsAbsoluteURL("http:/www.foo.com/bar"));
+  CHECK(!network::url::IsAbsoluteURL("http:www.foo.com/bar"));
+  CHECK(!network::url::IsAbsoluteURL("/foo/bar"));
+}
+
+void TestFilterURIString() {
+  std::string result;
+
+  network::url::FilterURIString(" \rhttp://a\tb\n ", result);
+  CHECK(result == "http://ab");
+
+  // nothing to filter -> the string is used unchanged
+  network::url::FilterURIString("http://a", result);
+  CHECK(result == "http://a");
+
+  network::url::FilterURIString("  \t ", result);
+  CHECK(result.empty());
+}
+
+void TestCharacterHelpers() {
+  char buf[] = "ABCDEF";
+  network::url::ToLowerCase(buf, 3);
+  CHECK(std::string(buf) == "abcDEF");
+  network::url::ToLowerCase(buf);
+  CHECK(std::string(buf) == "abcdef");
+
+  char set[] = "abcdef";
+  CHECK(network::url::FindCharInSet(set, set + 6, "cd") == set + 2);
+  // not found -> returns stop
+  CHECK(network::url::FindCharInSet(set, set + 6, "z") == set + 6);
+
+  char padded[] = "  a";
+  CHECK(network::url::FindCharNotInSet(padded, padded + 3, " ") == padded + 2);
+  // everything is in the set -> returns stop
+  CHECK(network::url::FindCharNotInSet(padded, padded + 2, " ") == padded + 2);
+
+  char trailing[] = "xab  ";
+  CHECK(network::url::RFindCharNotInSet(trailing + 1, trailing + 5, " ") ==
+        trailing + 3);
+}
+
+void TestIsValidDNSHost() {
+  CHECK(network::url::IsValidDNSHost("www.foo.com"));
+  CHECK(network::url::IsValidDNSHost("foo"));
+  CHECK(network::url::IsValidDNSHost("my-host_1.example.com"));
+  // space is not in the whitelist
+  CHECK(!network::url::IsValidDNSHost("www.foo com"));
+  // IPv6 literals reach DNS through the percent-sign path
+  CHECK(network::url::IsValidDNSHost("[::1]"));
+  // too long
+  CHECK(!network::url::IsValidDNSHost(std::string(300, 'a')));
+}
+
+void TestCoalesceDirs() {
+  {
+    char path[] = "/foo/./foo1";
+    auto result = network::url::CoalesceDirs(path);
+    CHECK(result.has_value());
+    CHECK(std::string(path) == "/foo/foo1");
+  }
+  {
+    char path[] = "/foo/foo1/..";
+    auto result = network::url::CoalesceDirs(path);
+    CHECK(result.has_value());
+    CHECK(std::string(path) == "/foo/");
+    CHECK(result->lastSlash == 0);
+    CHECK(result->endOfBasename == 5);
+  }
+  {
+    char path[] = "/foo/foo1/.";
+    auto result = network::url::CoalesceDirs(path);
+    CHECK(result.has_value());
+    CHECK(std::string(path) == "/foo/foo1/");
+  }
+  {
+    // %2e%2e between slashes is a ".." too
+    char path[] = "/foo/%2e%2e/bar";
+    auto result = network::url::CoalesceDirs(path);
+    CHECK(result.has_value());
+    CHECK(std::string(path) == "/bar");
+  }
+  {
+    // the path must start with a slash
+    char path[] = "foo/bar";
+    CHECK(!network::url::CoalesceDirs(path).has_value());
+  }
+}
+
+void TestParseFileURL() {
+  std::string directory, baseName, extension;
+
+  CHECK(network::url::ParseFileURL("file:///foo/bar.txt", directory, baseName,
+                                   extension) == Result::Ok);
+  CHECK(directory == "/foo/");
+  CHECK(baseName == "bar");
+  CHECK(extension == "txt");
+
+  CHECK(network::url::ParseFileURL("file:///foo/bar/", directory, baseName,
+                                   extension) == Result::Ok);
+  CHECK(directory == "/foo/bar/");
+  CHECK(baseName.empty());
+  CHECK(extension.empty());
+
+  // not a file:// url
+  CHECK(network::url::ParseFileURL("http://www.foo.com/bar.txt", directory,
+                                   baseName,
+                                   extension) == Result::ErrorUnexpected);
+
+  // no scheme at all
+  CHECK(network::url::ParseFileURL("1foo/bar.txt", directory, baseName,
+                                   extension) == Result::ErrorMalformedUri);
+}
+
 }  // namespace
 
 int main() {
@@ -339,6 +490,13 @@ int main() {
   TestParsePath();
   TestParseFilePath();
   TestParseFileName();
+  TestExtractURLScheme();
+  TestIsAbsoluteURL();
+  TestFilterURIString();
+  TestCharacterHelpers();
+  TestIsValidDNSHost();
+  TestCoalesceDirs();
+  TestParseFileURL();
 
   if (gFailures != 0) {
     std::fprintf(stderr, "%d check(s) failed\n", gFailures);
